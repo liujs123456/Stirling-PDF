@@ -15,11 +15,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import stirling.software.common.model.job.JobResult;
 import stirling.software.common.service.FileStorage;
+import stirling.software.common.service.JobOwnershipService;
 import stirling.software.common.service.JobQueue;
 import stirling.software.common.service.TaskManager;
 
@@ -404,4 +406,129 @@ class JobControllerTest {
 
         verify(taskManager).setError(jobId, "Job was cancelled by user");
     }
+
+    // Added by Pengcheng Xu: FSM coverage tests (access control and result branches).
+    @Test
+    void testGetJobStatus_Unauthorized_Returns403() {
+        String jobId = "unauthorized-job";
+
+        JobOwnershipService ownershipService = mock(JobOwnershipService.class);
+        ReflectionTestUtils.setField(controller, "jobOwnershipService", ownershipService);
+        when(ownershipService.validateJobAccess(jobId)).thenReturn(false);
+
+        ResponseEntity<?> response = controller.getJobStatus(jobId);
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertTrue(response.getBody().toString().contains("not authorized"));
+        verify(taskManager, never()).getJobResult(anyString());
+    }
+
+    @Test
+    void testGetJobResult_CompletedSuccessWithMultipleFiles_ReturnsMetadata() {
+        String jobId = "job-with-multiple-files";
+        JobResult mockResult = new JobResult();
+        mockResult.setJobId(jobId);
+        mockResult.completeWithFiles(
+                java.util.List.of(
+                        stirling.software.common.model.job.ResultFile.builder()
+                                .fileId("file-1")
+                                .fileName("a.pdf")
+                                .contentType(MediaType.APPLICATION_PDF_VALUE)
+                                .fileSize(100)
+                                .build(),
+                        stirling.software.common.model.job.ResultFile.builder()
+                                .fileId("file-2")
+                                .fileName("b.pdf")
+                                .contentType(MediaType.APPLICATION_PDF_VALUE)
+                                .fileSize(200)
+                                .build()));
+
+        when(taskManager.getJobResult(jobId)).thenReturn(mockResult);
+
+        ResponseEntity<?> response = controller.getJobResult(jobId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(MediaType.APPLICATION_JSON, response.getHeaders().getContentType());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertEquals(jobId, body.get("jobId"));
+        assertEquals(Boolean.TRUE, body.get("hasMultipleFiles"));
+
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> files = (java.util.List<Object>) body.get("files");
+        assertEquals(2, files.size());
+    }
+
+    // Added by Pengcheng Xu: FSM coverage tests (state/transition coverage with new cases).
+    @Test
+    void testGetJobStatus_NotFound_Returns404_New() {
+        String jobId = "missing-job";
+        when(taskManager.getJobResult(jobId)).thenReturn(null);
+
+        ResponseEntity<?> response = controller.getJobStatus(jobId);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+    }
+
+    @Test
+    void testGetJobStatus_Queued_ReturnsQueueInfo_New() {
+        String jobId = "queued-job";
+        JobResult mockResult = new JobResult();
+        mockResult.setJobId(jobId);
+        mockResult.setComplete(false);
+
+        when(taskManager.getJobResult(jobId)).thenReturn(mockResult);
+        when(jobQueue.isJobQueued(jobId)).thenReturn(true);
+        when(jobQueue.getJobPosition(jobId)).thenReturn(1);
+
+        ResponseEntity<?> response = controller.getJobStatus(jobId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> responseBody = (Map<String, Object>) response.getBody();
+        assertEquals(mockResult, responseBody.get("jobResult"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> queueInfo = (Map<String, Object>) responseBody.get("queueInfo");
+        assertEquals(Boolean.TRUE, queueInfo.get("inQueue"));
+        assertEquals(1, queueInfo.get("position"));
+    }
+
+    @Test
+    void testCancelJob_InProgress_MarksError_New() {
+        String jobId = "job-running-new";
+        JobResult jobResult = new JobResult();
+        jobResult.setJobId(jobId);
+        jobResult.setComplete(false);
+
+        when(jobQueue.isJobQueued(jobId)).thenReturn(false);
+        when(taskManager.getJobResult(jobId)).thenReturn(jobResult);
+
+        ResponseEntity<?> response = controller.cancelJob(jobId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> responseBody = (Map<String, Object>) response.getBody();
+        assertEquals("Job cancelled successfully", responseBody.get("message"));
+        assertEquals(Boolean.FALSE, responseBody.get("wasQueued"));
+
+        verify(taskManager).setError(jobId, "Job was cancelled by user");
+    }
+
+    @Test
+    void testGetJobResult_CompletedError_Returns400_New() {
+        String jobId = "job-error-new";
+        JobResult mockResult = new JobResult();
+        mockResult.setJobId(jobId);
+        mockResult.failWithError("Test error");
+
+        when(taskManager.getJobResult(jobId)).thenReturn(mockResult);
+
+        ResponseEntity<?> response = controller.getJobResult(jobId);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertTrue(response.getBody().toString().contains("Job failed"));
+    }
+
 }
