@@ -179,7 +179,8 @@ class StringToArrayListPropertyEditorTest {
         String json = "123";
 
         // Act & Assert
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(
+                IllegalArgumentException.class,
                 () -> editor.setAsText(json),
                 "Valid JSON of wrong type should throw IllegalArgumentException");
     }
