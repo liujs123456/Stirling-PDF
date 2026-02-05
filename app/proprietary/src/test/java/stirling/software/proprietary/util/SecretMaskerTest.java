@@ -134,18 +134,17 @@ class SecretMaskerTest {
             assertEquals("stringValue", list.get(2));
         }
 
-
         @Test
         @DisplayName(
-            "should NOT mask keys that merely contain 'key' as a substring (false positives)")
+                "should NOT mask keys that merely contain 'key' as a substring (false positives)")
         void shouldNotMaskFalsePositiveKeySubstrings() {
             Map<String, Object> input =
-                Map.of(
-                    "monkey", "v1",
-                    "hockey", "v2",
-                    "turkey", "v3",
-                    "keynote", "v4",
-                    "donkey", "v5");
+                    Map.of(
+                            "monkey", "v1",
+                            "hockey", "v2",
+                            "turkey", "v3",
+                            "keynote", "v4",
+                            "donkey", "v5");
 
             Map<String, Object> result = SecretMasker.mask(input);
 
