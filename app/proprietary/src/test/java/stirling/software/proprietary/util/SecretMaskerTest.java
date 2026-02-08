@@ -172,6 +172,47 @@ class SecretMaskerTest {
         }
 
         @Test
+        @DisplayName("should mask regardless of value type when key matches sensitive pattern")
+        void shouldMaskRegardlessOfValueType() {
+            Map<String, Object> input = new HashMap<>();
+            input.put("token", List.of("a", "b"));
+            input.put("secret", Map.of("x", 1));
+            input.put("password", 12345);
+
+            Map<String, Object> result = SecretMasker.mask(input);
+
+            assertEquals("***REDACTED***", result.get("token"));
+            assertEquals("***REDACTED***", result.get("secret"));
+            assertEquals("***REDACTED***", result.get("password"));
+        }
+
+        @Test
+        @DisplayName("should mask authorization key case-insensitively")
+        void shouldMaskAuthorizationCaseInsensitive() {
+            Map<String, Object> input = Map.of("AuThOrIzAtIoN", "Bearer abc");
+
+            Map<String, Object> result = SecretMasker.mask(input);
+
+            assertEquals("***REDACTED***", result.get("AuThOrIzAtIoN"));
+        }
+
+        @Test
+        @DisplayName("should deep-mask list containing a map (redact sensitive + keep normal)")
+        void shouldDeepMaskListContainingMap() {
+            Map<String, Object> input =
+                    Map.of("list", List.of(Map.of("cred", "xx", "keep", "ok"), 7));
+
+            Map<String, Object> result = SecretMasker.mask(input);
+
+            List<?> list = (List<?>) result.get("list");
+            Map<?, ?> first = (Map<?, ?>) list.get(0);
+
+            assertEquals("***REDACTED***", first.get("cred")); // sensitive -> redact
+            assertEquals("ok", first.get("keep")); // non-sensitive -> keep
+            assertEquals(7, list.get(1)); // leaf -> keep
+        }
+
+        @Test
         @DisplayName("should not mask when key does not match pattern")
         void shouldNotMaskWhenKeyNotSensitive() {
             Map<String, Object> input = Map.of("email", "test@example.com");
