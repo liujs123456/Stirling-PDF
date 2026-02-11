@@ -185,4 +185,42 @@ class StringToArrayListPropertyEditorTest {
                 () -> editor.setAsText(json),
                 "Valid JSON of wrong type should throw IllegalArgumentException");
     }
+
+    @Test
+    void testSetAsText_ValidJsonArray_ParsesSuccess() {
+        // arrange
+        String json =
+                "[{\"x\":10.0,\"y\":20.0,\"width\":100.0,\"height\":50.0,\"page\":1,\"color\":\"#FF0000\"}]";
+
+        // act
+        editor.setAsText(json);
+        Object value = editor.getValue();
+
+        // assert
+        assertNotNull(value);
+        assertInstanceOf(List.class, value);
+
+        @SuppressWarnings("unchecked")
+        List<RedactionArea> list = (List<RedactionArea>) value;
+        assertEquals(1, list.size());
+    }
+
+    @Test
+    void testSetAsText_SingleObject_ParsesSuccessDueToAcceptSingleValueAsArray() {
+        // arrange
+        String json =
+                "{\"x\":10.0,\"y\":20.0,\"width\":100.0,\"height\":50.0,\"page\":1,\"color\":\"#FF0000\"}";
+
+        // act
+        editor.setAsText(json);
+        Object value = editor.getValue();
+
+        // assert
+        assertNotNull(value);
+        assertInstanceOf(List.class, value);
+
+        @SuppressWarnings("unchecked")
+        List<RedactionArea> list = (List<RedactionArea>) value;
+        assertEquals(1, list.size());
+    }
 }
