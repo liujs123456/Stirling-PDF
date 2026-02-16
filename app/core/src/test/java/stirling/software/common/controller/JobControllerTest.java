@@ -530,4 +530,97 @@ class JobControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertTrue(response.getBody().toString().contains("Job failed"));
     }
+
+    // Added by Pengcheng Xu: white-box coverage tests for key file/metadata branches.
+    @Test
+    void testGetJobFiles_CompletedSuccess_ReturnsFileList_New() {
+        String jobId = "job-files-success";
+        JobResult mockResult = new JobResult();
+        mockResult.setJobId(jobId);
+        mockResult.completeWithFiles(
+                java.util.List.of(
+                        stirling.software.common.model.job.ResultFile.builder()
+                                .fileId("f1")
+                                .fileName("a.pdf")
+                                .contentType(MediaType.APPLICATION_PDF_VALUE)
+                                .fileSize(10)
+                                .build(),
+                        stirling.software.common.model.job.ResultFile.builder()
+                                .fileId("f2")
+                                .fileName("b.pdf")
+                                .contentType(MediaType.APPLICATION_PDF_VALUE)
+                                .fileSize(20)
+                                .build()));
+        when(taskManager.getJobResult(jobId)).thenReturn(mockResult);
+
+        ResponseEntity<?> response = controller.getJobFiles(jobId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertEquals(jobId, body.get("jobId"));
+        assertEquals(2, body.get("fileCount"));
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> files = (java.util.List<Object>) body.get("files");
+        assertEquals(2, files.size());
+    }
+
+    @Test
+    void testGetFileMetadata_FileExistsWithoutTrackedMetadata_ReturnsFallbackInfo_New()
+            throws Exception {
+        String fileId = "orphan-file";
+        when(fileStorage.fileExists(fileId)).thenReturn(true);
+        when(taskManager.findResultFileByFileId(fileId)).thenReturn(null);
+        when(fileStorage.getFileSize(fileId)).thenReturn(123L);
+
+        ResponseEntity<?> response = controller.getFileMetadata(fileId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertEquals(fileId, body.get("fileId"));
+        assertEquals("unknown", body.get("fileName"));
+        assertEquals(MediaType.APPLICATION_OCTET_STREAM_VALUE, body.get("contentType"));
+        assertEquals(123L, body.get("fileSize"));
+    }
+
+    @Test
+    void testGetFileMetadata_Exception_Returns500_New() throws Exception {
+        String fileId = "metadata-error-file";
+        when(fileStorage.fileExists(fileId)).thenReturn(true);
+        when(taskManager.findResultFileByFileId(fileId)).thenReturn(null);
+        when(fileStorage.getFileSize(fileId)).thenThrow(new RuntimeException("boom"));
+
+        ResponseEntity<?> response = controller.getFileMetadata(fileId);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertTrue(response.getBody().toString().contains("Error retrieving file metadata"));
+    }
+
+    @Test
+    void testDownloadFile_WithMetadata_ReturnsAttachmentHeadersAndBytes_New() throws Exception {
+        String fileId = "download-file";
+        byte[] content = "file-bytes".getBytes();
+        when(fileStorage.fileExists(fileId)).thenReturn(true);
+        when(fileStorage.retrieveBytes(fileId)).thenReturn(content);
+        when(taskManager.findResultFileByFileId(fileId))
+                .thenReturn(
+                        stirling.software.common.model.job.ResultFile.builder()
+                                .fileId(fileId)
+                                .fileName("my file.pdf")
+                                .contentType(MediaType.APPLICATION_PDF_VALUE)
+                                .fileSize(content.length)
+                                .build());
+
+        ResponseEntity<?> response = controller.downloadFile(fileId);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals(
+                MediaType.APPLICATION_PDF_VALUE, response.getHeaders().getFirst("Content-Type"));
+        String disposition = response.getHeaders().getFirst("Content-Disposition");
+        assertNotNull(disposition);
+        assertTrue(disposition.contains("my file.pdf"));
+        assertTrue(disposition.contains("my%20file.pdf"));
+        assertEquals(content, response.getBody());
+    }
 }
