@@ -1,6 +1,7 @@
 package stirling.software.common.util;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -9,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -188,5 +190,112 @@ class FileMonitorTest {
         // A directory should not be considered ready for processing
         boolean isReady = fileMonitor.isFileReadyForProcessing(testDir);
         assertFalse(isReady, "A directory should not be considered ready for processing");
+    }
+
+    // added by Dazhi Wang
+    @SuppressWarnings("unchecked")
+    private static <T> T getPrivateField(Object target, String fieldName) {
+        try {
+            var f = target.getClass().getDeclaredField(fieldName);
+            f.setAccessible(true);
+            return (T) f.get(target);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void setPrivateField(Object target, String fieldName, Object value) {
+        try {
+            var f = target.getClass().getDeclaredField(fieldName);
+            f.setAccessible(true);
+            f.set(target, value);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void testTrackFiles_FirstRunRegistersAndDiscoversExistingFiles() throws Exception {
+        // arrange: create file BEFORE calling trackFiles
+        Path f = tempDir.resolve("existing.txt");
+        Files.writeString(f, "hello");
+
+        // act
+        fileMonitor.trackFiles();
+
+        // assert: newlyDiscoveredFiles contains the file
+        Set<Path> newly = getPrivateField(fileMonitor, "newlyDiscoveredFiles");
+        assertTrue(newly.contains(f), "existing file should be discovered on first run");
+
+        // assert: root registered
+        var mapping = getPrivateField(fileMonitor, "path2KeyMapping");
+        assertTrue(
+                ((java.util.Map<?, ?>) mapping).size() > 0, "root directory should be registered");
+    }
+
+    @Test
+    void testTrackFiles_SecondRunMovesStagingToReady() throws Exception {
+        Path f = tempDir.resolve("staged.txt");
+        Files.writeString(f, "hi");
+
+        // 1st run: initializes and registers
+        fileMonitor.trackFiles();
+
+        // manually simulate that file was discovered in previous iteration
+        Set<Path> newly = getPrivateField(fileMonitor, "newlyDiscoveredFiles");
+        newly.add(f);
+
+        // 2nd run: should move staging -> ready
+        fileMonitor.trackFiles();
+
+        Set<Path> ready = getPrivateField(fileMonitor, "readyForProcessingFiles");
+
+        // implementation stores abs paths in ready set
+        assertTrue(
+                ready.contains(f.toAbsolutePath()) || ready.contains(f),
+                "file should appear in readyForProcessingFiles on second run");
+    }
+
+    @Test
+    void testTrackFiles_RemovedFromNewlyDiscovered_NotReadyNextRun() throws Exception {
+        Path f = tempDir.resolve("gone.txt");
+        Files.writeString(f, "x");
+
+        // first run: init / register
+        fileMonitor.trackFiles();
+
+        // simulate discovered
+        Set<Path> newly = getPrivateField(fileMonitor, "newlyDiscoveredFiles");
+        newly.add(f);
+
+        // now simulate removal before next cycle
+        newly.remove(f);
+
+        // second run
+        fileMonitor.trackFiles();
+
+        Set<Path> ready = getPrivateField(fileMonitor, "readyForProcessingFiles");
+        assertFalse(
+                ready.contains(f.toAbsolutePath()) || ready.contains(f),
+                "removed file should not be marked ready");
+    }
+
+    @Test
+    void testTrackFiles_WhenMappingEmpty_ReRegistersRootDir() throws Exception {
+        // force mapping empty
+        setPrivateField(
+                fileMonitor,
+                "path2KeyMapping",
+                new java.util.HashMap<Path, java.nio.file.WatchKey>());
+
+        // act
+        fileMonitor.trackFiles();
+
+        // assert mapping not empty (root registered)
+        var mapping = getPrivateField(fileMonitor, "path2KeyMapping");
+        assertTrue(
+                ((java.util.Map<?, ?>) mapping).size() > 0,
+                "should re-register root dir when mapping empty");
     }
 }

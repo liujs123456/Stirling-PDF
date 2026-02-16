@@ -530,5 +530,4 @@ class JobControllerTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertTrue(response.getBody().toString().contains("Job failed"));
     }
-
 }
